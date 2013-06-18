@@ -1,5 +1,6 @@
 exMailSync
 ============
+Synchronize your mail messages from an external mail to another mail using IMAP protocol.
 
 Example:
 If you want to sync an external email account `foobar@example.com` into a gmail account `foobar@gmail.com`, you should configure the script as follows:
