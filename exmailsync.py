@@ -38,7 +38,8 @@ while run:
 		run = False
 
 f.close()
-dest.close()
+
 dest.logout()
-infp.close()
 info.logout()
+dest.close()
+info.close()
