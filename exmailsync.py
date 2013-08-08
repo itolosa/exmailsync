@@ -3,11 +3,12 @@
 import imaplib 
 import time
 import getpass
-from daemon import runner
 import os
+import sys
+from daemon import Daemon
 
 LOGFILENAME = 'exmail.stdout.log'
-OUTPUT = 'file'
+OUTPUT = 'log'
 
 if OUTPUT == 'screen':
 	import sys
@@ -37,21 +38,21 @@ class ImapSSLConn(object):
 		self.conn = None
 
 
-	def format_log(errtype, msg):
+	def format_log(self, errtype, msg):
 		return str(time.ctime()) + ': ' + self.hostimap + ': ' + str(errtype) + ': ' + str(msg) + '\n'
 
-	def send_error(self, msg):
-		outstream.write(formatlog(errtype, msg))
+	def send_error(self, errtype, msg):
+		outstream.write(self.format_log(errtype, msg))
 		outstream.flush()
 		raise Exception
 
-	def send_info(self, msg):
-		outstream.write(formatlog(errtype, msg))
+	def send_info(self, errtype, msg):
+		outstream.write(self.format_log(errtype, msg))
 		outstream.flush()
 
 	def connect(self):
 		# comprueba que puerto usar
-		try:	
+		try:
 			if self.portimap:
 				self.send_info(error_type.info, 'Connecting with server using port: %d' % self.portimap)
 				self.conn = imaplib.IMAP4_SSL(self.hostimap, self.portimap)
@@ -59,20 +60,23 @@ class ImapSSLConn(object):
 				self.send_info(error_type.info, 'Connecting with server with default port')
 				self.conn = imaplib.IMAP4_SSL(self.hostimap)
 			
-			self.login(self.username, self.password)
-			self.select(self.boxmail)
+			self.conn.login(self.username, self.password)
+			self.conn.select(self.boxmail)
 		finally:
 			self.send_info(error_type.error, 'Couldnt be logged into the account')
 
 	def close_conn(self):
-		self.conn.close()
-		self.conn.logout()
+		#self.conn.close()
+		try:
+			self.conn.logout()
+		except:
+			pass
 
 	def reconnect(self):
+		self.close_conn()
 		self.connect()
-		self.reconnect()
 
-	def check_unread(self):
+	def check_msg(self):
 		status, body = self.conn.search(None, 'UnSeen')
 		if status and body[0]:
 			self.un_seen = body[0]
@@ -80,7 +84,7 @@ class ImapSSLConn(object):
 		self.un_seen = None
 		return None
 		
-	def walk_unread(self):
+	def walk_msg(self):
 		if self.un_seen:
 			for m in self.un_seen.split():
 				self.send_info(error_type.newmail, m)
@@ -98,17 +102,19 @@ class SyncManager(object):
 	def __init__(self, origconf, destconf):
 		self.origin = ImapSSLConn(origconf)
 		self.dest = ImapSSLConn(destconf)
+		self.dest.connect()
+		self.origin.connect()
 
-	def format_log(errtype, msg):
+	def format_log(self, errtype, msg):
 		return str(time.ctime()) + ': ' + str(errtype) + ': ' + str(msg) + '\n'
 
-	def send_error(self, msg):
-		outstream.write(formatlog(errtype, msg))
+	def send_error(self, errtype, msg):
+		outstream.write(self.format_log(errtype, msg))
 		outstream.flush()
 		raise Exception
 
-	def send_info(self, msg):
-		outstream.write(formatlog(errtype, msg))
+	def send_info(self, errtype, msg):
+		outstream.write(self.format_log(errtype, msg))
 		outstream.flush()
 
 	def sync_forever(self):
@@ -118,16 +124,16 @@ class SyncManager(object):
 		run = True
 		num_errors = 0
 
-		fp.write('*************************\n')
-		fp.write('checking mailbox...\n')
-		fp.write(formatlog('------> delay', str(delay_t)))
-		fp.flush()
+		outstream.write('*************************\n')
+		outstream.write('checking mailbox...\n')
+		outstream.write(self.format_log('------> delay', str(delay_t)))
+		outstream.flush()
 
 		while run:
 			try:
 				if self.origin.check_msg():
 					self.send_info(error_type.info, 'new msg, checking content...')
-					for data in self.origin.walk_unread():
+					for data in self.origin.walk_msg():
 						#cp mail in INBOX
 						while num_errors < limit_error:
 							try:
@@ -146,6 +152,7 @@ class SyncManager(object):
 					self.send_info(error_type.error, 'Posibly not connected')
 					self.send_info(error_type.info, 'Trying reconnection...')
 					self.origin.reconnect()
+					num_errors += 1
 				except Exception:
 					num_errors += 1
 					self.send_info(error_type.error, 'Failed attempt to reconnect!')
@@ -155,23 +162,22 @@ class SyncManager(object):
 				#wait before retry
 				#time.sleep(wait_retry)
 
-		self.send_info(error_type.info, 'logging out connections...'))
+		self.send_info(error_type.info, 'logging out connections...')
 		self.origin.close_conn()
 		self.dest.close_conn()
 		outstream.close()
 
+class SyncDaemon(Daemon):
 
-class App():
+	def __init__(self, pid):
+		self.stdin = '/dev/null'
+		self.stdout = '/dev/null'
+		self.stderr = '/dev/null'
+		self.pidfile = pid
 
-    def __init__(self):
-        self.stdin_path = '/dev/null'
-        self.stdout_path = '/dev/tty'
-        self.stderr_path = '/dev/tty'
-        self.pidfile_path = '/var/run/mydaemon.pid'
-        self.pidfile_timeout = 5
-
-        print 'inf (origin) pass: ',
-    	origin_mailbox = {
+	def setconf(self):
+		print 'inf (origin) pass: ',
+		self.origin_mailbox = {
 			'host': 'alegre.inf.utfsm.cl',
 			'port': 993,
 			'user': 'ignacio.tolosa',
@@ -180,7 +186,7 @@ class App():
 		}
 
 		print 'gmail (dest) pass: ',
-		dest_mailbox = {
+		self.dest_mailbox = {
 			'host': 'imap.gmail.com',
 			'port': None,
 			'user': 'ignacio.tolosa.12@sansano.usm.cl',
@@ -188,11 +194,25 @@ class App():
 			'boxmail': 'INBOX'
 		}
 
-		self.conn = SyncManager(origin_mailbox, dest_mailbox)
-		
-    def run(self):
+	def run(self):
+		self.conn = SyncManager(self.origin_mailbox, self.dest_mailbox)
 		self.conn.sync_forever()
 
-app = App()
-daemon_runner = runner.DaemonRunner(app)
-daemon_runner.do_action()
+
+if __name__ == "__main__":
+    daemon = SyncDaemon('/tmp/sync-manager.pid')
+    if len(sys.argv) == 2:
+        if 'start' == sys.argv[1]:
+            daemon.setconf()
+            daemon.start()
+        elif 'stop' == sys.argv[1]:
+            daemon.stop()
+        elif 'restart' == sys.argv[1]:
+            daemon.restart()
+        else:
+            print "Unknown command"
+            sys.exit(2)
+    	sys.exit(0)
+    else:
+        print "usage: %s start|stop|restart" % sys.argv[0]
+        sys.exit(2)
