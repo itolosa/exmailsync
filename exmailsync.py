@@ -62,7 +62,7 @@ class ImapSSLConn(object):
 			
 			self.conn.login(self.username, self.password)
 			self.conn.select(self.boxmail)
-		finally:
+		except Exception:
 			self.send_info(error_type.error, 'Couldnt be logged into the account')
 
 	def close_conn(self):
