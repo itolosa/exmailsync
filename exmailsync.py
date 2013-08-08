@@ -144,6 +144,7 @@ class SyncManager(object):
 								self.dest.reconnect()
 								num_errors += 1
 								continue
+							num_errors = 0
 							break
 				#wait delay_t before check again for new messages
 				time.sleep(delay_t)
