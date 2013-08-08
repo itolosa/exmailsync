@@ -1,4 +1,4 @@
-exMailSync
+exmailsync
 ============
 Synchronize your mail messages from an external mail to another mail using IMAP protocol.
 
